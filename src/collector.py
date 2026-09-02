@@ -48,13 +48,11 @@ query($accountId: String!, $start: String!, $end: String!, $limit: Int!) {
       aiGatewayRequestsAdaptiveGroups(
         limit: $limit
         filter: { datetimeHour_geq: $start, datetimeHour_leq: $end }
-        orderBy: [datetimeMinute_ASC]
       ) {
         count
         sum {
           tokensIn
           tokensOut
-          costUSD
         }
         dimensions {
           model
@@ -75,13 +73,11 @@ query($accountId: String!, $start: String!, $end: String!, $limit: Int!) {
       aiGatewayRequestsAdaptiveGroups(
         limit: $limit
         filter: { datetimeHour_geq: $start, datetimeHour_leq: $end }
-        orderBy: [datetimeDay_ASC]
       ) {
         count
         sum {
           tokensIn
           tokensOut
-          costUSD
         }
         dimensions {
           date: datetimeDay
@@ -122,8 +118,9 @@ def graphql(query: str, variables: dict, token: str) -> dict:
     try:
         with urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
-        if "errors" in data:
-            raise RuntimeError(json.dumps(data["errors"]))
+        errors = data.get("errors")
+        if errors and any(e for e in errors if e is not None):
+            raise RuntimeError(json.dumps(errors))
         return data
     except HTTPError as e:
         body = e.read().decode() if e.fp else ""
@@ -162,9 +159,14 @@ def collect(cfg: dict) -> dict:
 
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # CF limits queries to 4w4d max
+    max_lookback = now - timedelta(weeks=4, days=3)
     month_start = today_start.replace(day=1)
+    if month_start < max_lookback:
+        month_start = max_lookback
 
     # ── Fetch hourly data for today ──────────────────────────────────
+    hourly_groups = []
     try:
         hourly = graphql(QUERY_USAGE, {
             "accountId": account_id,
@@ -172,17 +174,17 @@ def collect(cfg: dict) -> dict:
             "end": now.isoformat(),
             "limit": 5000,
         }, token)
-    except RuntimeError as e:
-        return {"error": f"GraphQL failed: {e}"}
-
-    hourly_groups = (
-        hourly.get("data", {})
-        .get("viewer", {})
-        .get("accounts", [{}])[0]
-        .get("aiGatewayRequestsAdaptiveGroups", [])
-    )
+        hourly_groups = (
+            hourly.get("data", {})
+            .get("viewer", {})
+            .get("accounts", [{}])[0]
+            .get("aiGatewayRequestsAdaptiveGroups", [])
+        )
+    except RuntimeError:
+        pass  # No data yet is OK
 
     # ── Fetch daily data for the month ───────────────────────────────
+    daily_groups = []
     try:
         daily = graphql(QUERY_DAILY, {
             "accountId": account_id,
@@ -190,21 +192,19 @@ def collect(cfg: dict) -> dict:
             "end": now.isoformat(),
             "limit": 5000,
         }, token)
-    except RuntimeError as e:
-        return {"error": f"GraphQL daily failed: {e}"}
-
-    daily_groups = (
-        daily.get("data", {})
-        .get("viewer", {})
-        .get("accounts", [{}])[0]
-        .get("aiGatewayRequestsAdaptiveGroups", [])
-    )
+        daily_groups = (
+            daily.get("data", {})
+            .get("viewer", {})
+            .get("accounts", [{}])[0]
+            .get("aiGatewayRequestsAdaptiveGroups", [])
+        )
+    except RuntimeError:
+        pass  # No data yet is OK
 
     # ── Aggregate today's stats ──────────────────────────────────────
     today_requests = 0
     today_tokens_in = 0
     today_tokens_out = 0
-    today_cost = 0.0
     today_by_model: dict[str, int] = {}
     today_by_provider: dict[str, int] = {}
 
@@ -213,7 +213,6 @@ def collect(cfg: dict) -> dict:
         s = g.get("sum", {})
         tokens_in = s.get("tokensIn", 0) or 0
         tokens_out = s.get("tokensOut", 0) or 0
-        cost = s.get("costUSD", 0) or 0
         dims = g.get("dimensions", {})
         model = dims.get("model", "unknown")
         provider = dims.get("provider", "unknown")
@@ -221,18 +220,16 @@ def collect(cfg: dict) -> dict:
         today_requests += count
         today_tokens_in += tokens_in
         today_tokens_out += tokens_out
-        today_cost += cost
 
         total_tokens = tokens_in + tokens_out
         today_by_model[model] = today_by_model.get(model, 0) + total_tokens
         today_by_provider[provider] = today_by_provider.get(provider, 0) + total_tokens
 
-    # ── Aggregate daily stats for the month ──────────────────────────
+    # ── Aggregate daily stats ────────────────────────────────────────
     daily_map: dict[str, int] = {}
     month_requests = 0
     month_tokens_in = 0
     month_tokens_out = 0
-    month_cost = 0.0
     month_by_model: dict[str, dict] = {}
     month_by_provider: dict[str, int] = {}
 
@@ -241,7 +238,6 @@ def collect(cfg: dict) -> dict:
         s = g.get("sum", {})
         tokens_in = s.get("tokensIn", 0) or 0
         tokens_out = s.get("tokensOut", 0) or 0
-        cost = s.get("costUSD", 0) or 0
         dims = g.get("dimensions", {})
         date = dims.get("date", "")
         model = dims.get("model", "unknown")
@@ -250,21 +246,16 @@ def collect(cfg: dict) -> dict:
         month_requests += count
         month_tokens_in += tokens_in
         month_tokens_out += tokens_out
-        month_cost += cost
 
         total_tokens = tokens_in + tokens_out
         if date:
             daily_map[date] = daily_map.get(date, 0) + total_tokens
 
         if model not in month_by_model:
-            month_by_model[model] = {
-                "inputTokens": 0, "outputTokens": 0,
-                "requests": 0, "costUSD": 0.0,
-            }
+            month_by_model[model] = {"inputTokens": 0, "outputTokens": 0, "requests": 0}
         month_by_model[model]["inputTokens"] += tokens_in
         month_by_model[model]["outputTokens"] += tokens_out
         month_by_model[model]["requests"] += count
-        month_by_model[model]["costUSD"] += cost
 
         month_by_provider[provider] = month_by_provider.get(provider, 0) + total_tokens
 
@@ -282,26 +273,26 @@ def collect(cfg: dict) -> dict:
             "cacheCreationInputTokens": 0,
         }
 
-    # ── Limits ───────────────────────────────────────────────────────
+    # ── Limits (token-based, not cost-based since CF doesn't expose costUSD) ──
     limits = []
     budget = cfg.get("monthly_budget_credits", 0)
-    if budget > 0 and month_cost > 0:
+    month_total_tokens = month_tokens_in + month_tokens_out
+    if budget > 0 and month_total_tokens > 0:
         limits.append({
             "label": "Monthly",
             "title": "Monthly",
-            "percent": min(month_cost / budget, 1.0),
+            "percent": min(month_total_tokens / budget, 1.0),
             "resetsAt": month_end_iso(),
         })
 
     # ── Tier label with run-out estimate ─────────────────────────────
     tier_label = cfg.get("tier_label", "")
-    if budget > 0 and month_cost > 0:
-        days_in_month = 30
+    if budget > 0 and month_total_tokens > 0:
         day_of_month = now.day
-        avg_daily_cost = month_cost / max(day_of_month, 1)
-        remaining = budget - month_cost
-        if avg_daily_cost > 0 and remaining > 0:
-            days_left = remaining / avg_daily_cost
+        avg_daily = month_total_tokens / max(day_of_month, 1)
+        remaining = budget - month_total_tokens
+        if avg_daily > 0 and remaining > 0:
+            days_left = remaining / avg_daily
             runout = now + timedelta(days=days_left)
             tier_label = f"{tier_label} · runs out {runout.strftime('%b %d')}" if tier_label else f"runs out {runout.strftime('%b %d')}"
 
@@ -314,7 +305,7 @@ def collect(cfg: dict) -> dict:
         "ready": True,
         "hasLocalStats": True,
         "todayPrompts": today_requests,
-        "todaySessions": 0,  # CF doesn't track sessions
+        "todaySessions": 0,
         "todayTotalTokens": today_tokens_in + today_tokens_out,
         "todayTokensByModel": today_by_model,
         "recentDays": recent_days,
@@ -325,10 +316,8 @@ def collect(cfg: dict) -> dict:
         "modelUsage": model_usage,
         "limits": limits,
         "tierLabel": tier_label,
-        # Extra fields for the dashboard
+        # Extra fields
         "providers": month_by_provider,
-        "todayCostUSD": round(today_cost, 4),
-        "monthCostUSD": round(month_cost, 4),
         "todayTokensIn": today_tokens_in,
         "todayTokensOut": today_tokens_out,
     }
@@ -400,7 +389,8 @@ def list_providers(cfg: dict) -> None:
         print(f"  {model}: {total:,} tokens (in: {bucket['inputTokens']:,}, out: {bucket['outputTokens']:,})")
 
     print(f"\nToday: {record['todayTotalTokens']:,} tokens, {record['todayPrompts']} requests")
-    print(f"Month: {record['monthCostUSD']:.4f} USD")
+    month_total = sum(b['inputTokens'] + b['outputTokens'] for b in models.values())
+    print(f"Month: {month_total:,} tokens across {len(models)} models")
 
 
 def main():
