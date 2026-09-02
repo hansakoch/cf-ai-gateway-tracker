@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CF AI Gateway Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; }
+        .container { max-width: 800px; margin: 0 auto; padding: 2rem; }
+        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #f97316, #ef4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { color: #888; font-size: 1.2rem; margin-bottom: 2rem; }
+        .card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card h2 { color: #f97316; margin-bottom: 1rem; font-size: 1.3rem; }
+        .feature { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+        .feature-icon { font-size: 1.5rem; min-width: 2rem; }
+        .feature-text h3 { color: #fff; margin-bottom: 0.25rem; }
+        .feature-text p { color: #888; font-size: 0.9rem; }
+        code { background: #2a2a2a; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9rem; }
+        pre { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 1rem 0; }
+        pre code { background: none; padding: 0; }
+        .btn { display: inline-block; background: #f97316; color: #000; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; margin-right: 1rem; margin-bottom: 1rem; }
+        .btn:hover { background: #ea580c; }
+        .btn-outline { background: transparent; border: 1px solid #f97316; color: #f97316; }
+        .providers { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+        .provider { background: #2a2a2a; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; }
+        .footer { text-align: center; color: #666; margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CF AI Gateway Tracker</h1>
+        <p class="subtitle">Unified AI usage tracking through Cloudflare AI Gateway. One applet to rule them all.</p>
+
+        <div class="card">
+            <h2>What it does</h2>
+            <div class="feature">
+                <span class="feature-icon">📊</span>
+                <div class="feature-text">
+                    <h3>Unified Analytics</h3>
+                    <p>Track Xiaomi MiMo, OpenAI, Anthropic, Grok, Workers AI, and any BYOK provider in one dashboard.</p>
+                </div>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">💰</span>
+                <div class="feature-text">
+                    <h3>Cost Tracking</h3>
+                    <p>Real-time USD costs across all providers. Budget alerts and run-out date estimation.</p>
+                </div>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">⚡</span>
+                <div class="feature-text">
+                    <h3>Omarchy Panel</h3>
+                    <p>Native integration with the Omarchy agents panel. Daily/monthly meters, 7-day charts, per-model breakdowns.</p>
+                </div>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔒</span>
+                <div class="feature-text">
+                    <h3>BYOK Support</h3>
+                    <p>Bring your own keys for any provider. Cloudflare routes and tracks everything.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Supported Providers</h2>
+            <div class="providers">
+                <span class="provider">Xiaomi MiMo</span>
+                <span class="provider">OpenAI</span>
+                <span class="provider">Anthropic</span>
+                <span class="provider">Google Gemini</span>
+                <span class="provider">Grok</span>
+                <span class="provider">Workers AI</span>
+                <span class="provider">Mistral</span>
+                <span class="provider">Replicate</span>
+                <span class="provider">AWS Bedrock</span>
+                <span class="provider">Azure OpenAI</span>
+                <span class="provider">+ 20 more</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Quick Start</h2>
+            <pre><code># Clone and setup
+git clone https://github.com/hansakoch/cf-ai-gateway-tracker.git
+cd cf-ai-gateway-tracker
+./setup.sh
+
+# Configure
+nano ~/.config/cf-ai-gateway/config.json
+
+# Test
+python3 ~/.local/bin/cf-ai-gateway-collector --test</code></pre>
+        </div>
+
+        <div class="card">
+            <h2>Route Your Traffic</h2>
+            <p>Change your base URL to route through CF Gateway:</p>
+            <pre><code># Before
+https://token-plan-sgp.xiaomimimo.com/v1
+
+# After
+https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/xiaomi/v1</code></pre>
+        </div>
+
+        <div>
+            <a href="https://github.com/hansakoch/cf-ai-gateway-tracker" class="btn">View on GitHub</a>
+            <a href="https://developers.cloudflare.com/ai-gateway/" class="btn btn-outline">CF AI Gateway Docs</a>
+        </div>
+
+        <div class="footer">
+            <p>Built for the Omarchy community. MIT License.</p>
+        </div>
+    </div>
+</body>
+</html>

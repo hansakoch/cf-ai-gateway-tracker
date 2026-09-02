@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Omarchy agents panel collector for CF AI Gateway.
+
+Wraps the CF AI Gateway analytics collector into the JSON schema
+the Omarchy agents panel expects. Install as:
+  ~/.local/bin/omarchy-agent-usage-cf-gateway
+  or symlink into /usr/share/omarchy/bin/
+"""
+
+import json
+import sys
+from pathlib import Path
+
+# Add the collector module
+COLLECTOR = Path(__file__).parent / "collector.py"
+if not COLLECTOR.exists():
+    # Try relative to script location
+    COLLECTOR = Path.home() / ".local" / "bin" / "cf-ai-gateway-collector"
+
+def main():
+    try:
+        # Import and run the collector
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("collector", str(COLLECTOR))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        
+        cfg = mod.load_config()
+        record = mod.collect(cfg)
+        print(json.dumps(record))
+    except Exception as e:
+        # Fallback empty record
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        dates = [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+        record = {
+            "schemaVersion": 1,
+            "id": "cf-ai-gateway",
+            "name": "CF AI Gateway",
+            "updatedAt": now.isoformat(),
+            "ready": False,
+            "hasLocalStats": True,
+            "usageStatusText": f"Error: {e}",
+            "authHelpText": "Configure ~/.config/cf-ai-gateway/config.json",
+            "todayPrompts": 0, "todaySessions": 0,
+            "todayTotalTokens": 0, "todayTokensByModel": {},
+            "recentDays": [{"date": d, "messageCount": 0} for d in dates],
+            "totalPrompts": 0, "totalSessions": 0,
+            "activeDays": 0, "activeDates": [],
+            "modelUsage": {}, "limits": [], "tierLabel": "",
+        }
+        print(json.dumps(record))
+
+if __name__ == "__main__":
+    main()
