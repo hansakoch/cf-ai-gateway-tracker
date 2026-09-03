@@ -344,12 +344,17 @@ def collect(cfg: dict) -> dict:
         }
 
     # ── Build record ─────────────────────────────────────────────────
+    # Show the tab even when there's no traffic — user wants to see "nothing"
+    # so they can address it. activeDays=1 + ready=true keeps the panel visible.
+    has_traffic = today_requests > 0 or month_requests > 0
+    connected = gw is not None or len(gateways) > 0
+
     record = {
         "schemaVersion": 1,
         "id": AGENT_ID,
         "name": AGENT_NAME,
         "updatedAt": now.isoformat(),
-        "ready": True,
+        "ready": connected,
         "hasLocalStats": True,
         "todayPrompts": today_requests,
         "todaySessions": 0,
@@ -358,11 +363,11 @@ def collect(cfg: dict) -> dict:
         "recentDays": recent_days,
         "totalPrompts": month_requests,
         "totalSessions": 0,
-        "activeDays": len([d for d in daily_map.values() if d > 0]),
+        "activeDays": max(len([d for d in daily_map.values() if d > 0]), 1 if connected else 0),
         "activeDates": sorted(daily_map.keys()),
         "modelUsage": model_usage,
         "limits": [],
-        "tierLabel": "",
+        "tierLabel": f"{len(gateways)} gateways · no traffic yet" if not has_traffic and gateways else "",
         "providers": month_by_provider,
         "todayTokensIn": gw["today_tokens_in"] if gw else 0,
         "todayTokensOut": gw["today_tokens_out"] if gw else 0,
