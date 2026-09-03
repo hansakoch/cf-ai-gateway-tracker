@@ -404,7 +404,7 @@ def collect(cfg: dict) -> dict:
         if percent > 0:
             limits.append({
                 "label": "Monthly",
-                "title": f"MiMo Token Plan ({mimo['models'].get('mimo-v2.5-pro', {}).get('credit_multiplier', 2)}x pro / {mimo['models'].get('mimo-v2.5', {}).get('credit_multiplier', 1)}x std)",
+                "title": "MiMo Token Plan",
                 "percent": min(percent, 1.0),
                 "resetsAt": month_end_iso(),
             })
