@@ -299,6 +299,26 @@ def collect_gateway(cfg: dict) -> dict | None:
     }
 
 
+def collect_gateways(cfg: dict) -> list[dict]:
+    """Fetch AI Gateway list from CF API."""
+    account_id = cfg.get("account_id", "")
+    token = cfg.get("api_token", "")
+    if not account_id or not token:
+        return []
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai-gateway/gateways"
+    req = Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        if data.get("success"):
+            return data.get("result", [])
+    except Exception:
+        pass
+    return []
+
+
 def collect_mimo(cfg: dict) -> dict | None:
     """Collect MiMo Token Plan details from config."""
     mimo = cfg.get("mimo_token_plan", {})
@@ -357,6 +377,7 @@ def collect(cfg: dict) -> dict:
 
     # ── CF AI Gateway (primary) ──────────────────────────────────────
     gw = collect_gateway(cfg)
+    gateways = collect_gateways(cfg)
 
     # ── MiMo Token Plan (supplementary) ──────────────────────────────
     mimo = collect_mimo(cfg)
@@ -448,6 +469,28 @@ def collect(cfg: dict) -> dict:
             "dashboardUpdated": mimo["dashboard_updated"],
             "models": mimo["models"],
         }
+        # Next renewal date
+        renewal_day = mimo["renewal_day"]
+        if now.day >= renewal_day:
+            next_renewal = (now.replace(day=1) + timedelta(days=32)).replace(day=renewal_day)
+        else:
+            next_renewal = now.replace(day=renewal_day)
+        record["billing"] = {
+            "nextRenewal": next_renewal.strftime("%Y-%m-%d"),
+            "daysUntilRenewal": (next_renewal - now.replace(hour=0, minute=0, second=0, microsecond=0)).days,
+        }
+
+    # Add gateway info
+    if gateways:
+        record["gateways"] = [
+            {
+                "id": g["id"],
+                "isDefault": g.get("is_default", False),
+                "billingMode": g.get("workers_ai_billing_mode", "unknown"),
+                "createdAt": g.get("created_at", ""),
+            }
+            for g in gateways
+        ]
 
     return record
 
