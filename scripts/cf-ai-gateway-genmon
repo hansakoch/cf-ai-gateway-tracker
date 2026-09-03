@@ -1,0 +1,45 @@
+#!/bin/bash
+# XFCE genmon widget for CF AI Gateway + MiMo Token Plan usage
+
+MIMO_PCT=""
+GW_COUNT=""
+
+# MiMo Token Plan
+if [ -f "$HOME/.config/mimocode/usage-config.json" ]; then
+    MIMO_PCT=$(python3 -c "
+import json
+d = json.load(open('$HOME/.config/mimocode/usage-config.json'))
+c = d.get('monthly_tokens', 0)
+u = d.get('current_used_credits', 0)
+if c > 0 and u > 0:
+    print(f'{u/c*100:.0f}%')
+" 2>/dev/null)
+fi
+
+# CF Gateway
+if [ -f "$HOME/.config/cf-ai-gateway/config.json" ]; then
+    GW_COUNT=$(python3 -c "
+import json, urllib.request
+d = json.load(open('$HOME/.config/cf-ai-gateway/config.json'))
+a = d.get('account_id', '')
+t = d.get('api_token', '')
+if a and t:
+    req = urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{a}/ai-gateway/gateways', method='GET')
+    req.add_header('Authorization', f'Bearer {t}')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+            print(len(data.get('result', [])))
+    except: pass
+" 2>/dev/null)
+fi
+
+# Build display
+TEXT=""
+[ -n "$MIMO_PCT" ] && TEXT="MiMo $MIMO_PCT"
+[ -n "$GW_COUNT" ] && TEXT="${TEXT:+$TEXT · }CF $GW_COUNT gw"
+[ -z "$TEXT" ] && TEXT="AI: no config"
+
+echo "<txt>$TEXT</txt>"
+echo "<tool>CF AI Gateway: ${GW_COUNT:-?} gateways\nMiMo Token Plan: ${MIMO_PCT:-?} used</tool>"
+echo "<icon>utilities-terminal</icon>"
