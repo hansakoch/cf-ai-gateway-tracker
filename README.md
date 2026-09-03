@@ -1,17 +1,21 @@
 # CF AI Gateway Tracker
 
-Unified AI usage tracking through Cloudflare AI Gateway. One applet to rule them all — Xiaomi MiMo, OpenAI, Anthropic, Grok, Workers AI, and any BYOK provider.
+Unified AI usage tracking through Cloudflare AI Gateway + MiMo Token Plan. One applet to rule them all — Xiaomi MiMo, OpenAI, Anthropic, Grok, Workers AI, and any BYOK provider.
 
 ## What it does
 
-Routes all your AI API calls through Cloudflare AI Gateway and displays usage analytics in your Omarchy panel:
+Two data sources, one applet:
 
-- **Daily/monthly token usage** across all providers
-- **Per-provider breakdown** (who's eating your credits)
-- **Cost tracking** in USD
-- **7-day usage chart**
-- **Run-out date estimation** (when you'll hit your budget)
-- **Request counts** and error rates
+- **CF AI Gateway** (primary) — requests, tokens, per-provider breakdown via GraphQL analytics
+- **MiMo Token Plan** (supplementary) — credits used, burn rate, run-out date, credit multipliers
+
+Displays everything in your Omarchy panel:
+- Daily/monthly token usage across all providers
+- Per-provider and per-model breakdowns
+- 7-day usage chart
+- Run-out date estimation from actual dashboard burn rate
+- Credit multipliers (2x pro / 1x std) in limit meter
+- MiMo Token Plan details (credits, renewal day, dashboard snapshot)
 
 ## Quick start
 
@@ -40,10 +44,38 @@ Edit `~/.config/cf-ai-gateway/config.json`:
     "account_id": "your-32-char-cloudflare-account-id",
     "api_token": "your-cloudflare-api-token",
     "gateway_id": "default",
-    "monthly_budget_credits": 82000000000,
-    "tier_label": "Max Monthly Plan"
+
+    "mimo_token_plan": {
+        "enabled": true,
+        "monthly_credits": 82000000000,
+        "current_used": 18000000000,
+        "dashboard_updated": "2026-09-02",
+        "renewal_day": 30,
+        "tier_label": "Max Monthly Plan",
+        "api_base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+        "models": {
+            "mimo-v2.5-pro": {"credit_multiplier": 2, "type": "text"},
+            "mimo-v2.5": {"credit_multiplier": 1, "type": "text+image"},
+            "mimo-auto": {"credit_multiplier": 1, "type": "text"}
+        }
+    }
 }
 ```
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| `account_id` | Cloudflare account ID (dashboard sidebar) |
+| `api_token` | CF API token with `AI Gateway - Read` permission |
+| `gateway_id` | AI Gateway name (default: `default`) |
+| `mimo_token_plan.enabled` | Enable MiMo Token Plan tracking |
+| `mimo_token_plan.monthly_credits` | Total monthly credits (e.g. 82B) |
+| `mimo_token_plan.current_used` | Credits used so far (from dashboard) |
+| `mimo_token_plan.dashboard_updated` | Date you checked the dashboard (YYYY-MM-DD) |
+| `mimo_token_plan.renewal_day` | Day of month the plan renews (e.g. 30) |
+| `mimo_token_plan.tier_label` | Display label (e.g. "Max Monthly Plan") |
+| `mimo_token_plan.models` | Per-model credit multipliers and types |
 
 ### Getting your credentials
 
@@ -52,11 +84,28 @@ Edit `~/.config/cf-ai-gateway/config.json`:
    - `AI Gateway - Read`
    - `AI Gateway - Edit`
 
+### Updating MiMo Token Plan usage
+
+The collector can't query the Xiaomi dashboard API directly. Update `current_used` and `dashboard_updated` in the config whenever you check the dashboard:
+
+```bash
+# Edit config
+nano ~/.config/cf-ai-gateway/config.json
+
+# Update these fields:
+# "current_used": 25000000000,
+# "dashboard_updated": "2026-09-05"
+
+# Clear cache and refresh
+rm ~/.cache/cf-ai-gateway/analytics.json
+python3 ~/.local/bin/cf-ai-gateway-collector --test
+```
+
+The run-out date recalculates from the dashboard snapshot's daily burn rate.
+
 ## Route your AI traffic through CF Gateway
 
 ### Xiaomi MiMo (Hermes, MiMoCode, Grok CLI)
-
-Update your base URL to route through CF Gateway:
 
 ```
 # Before
@@ -89,7 +138,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/c
 ## CLI usage
 
 ```bash
-# Test connectivity
+# Test connectivity + MiMo Token Plan status
 python3 ~/.local/bin/cf-ai-gateway-collector --test
 
 # List providers with usage
@@ -108,7 +157,8 @@ The applet shows:
 - 7-day usage bar chart
 - Per-model token breakdown
 - Monthly budget meter with run-out date
-- Provider distribution
+- MiMo Token Plan credit multipliers
+- Provider distribution (when traffic routes through CF Gateway)
 
 ## Architecture
 
@@ -121,7 +171,7 @@ The applet shows:
        └───────────────────┼───────────────────┘
                            │
                     ┌──────▼──────┐
-                    │ CF AI Gateway│
+                    │ CF AI Gateway│ ◄── Primary analytics
                     │  (proxy)    │
                     └──────┬──────┘
                            │
@@ -136,15 +186,24 @@ The applet shows:
                     │  Analytics  │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐
-                    │   Collector │
-                    │   (Python)  │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ Omarchy     │
-                    │ Panel       │
-                    └─────────────┘
+       ┌───────────────────┤
+       │                   │
+┌──────▼──────┐     ┌──────▼──────┐
+│ CF Gateway  │     │ MiMo Token  │ ◄── Supplementary
+│ Analytics   │     │ Plan Config │
+└──────┬──────┘     └──────┬──────┘
+       │                   │
+       └─────────┬─────────┘
+                 │
+          ┌──────▼──────┐
+          │  Collector  │
+          │  (unified)  │
+          └──────┬──────┘
+                 │
+          ┌──────▼──────┐
+          │ Omarchy     │
+          │ Panel       │
+          └─────────────┘
 ```
 
 ## Why CF AI Gateway?
@@ -156,27 +215,6 @@ The applet shows:
 - **Rate limiting**: Control your spending
 - **Fallbacks**: Route to backup providers on failure
 - **Community**: Share your config, compare usage with others
-
-## API Reference
-
-The collector uses Cloudflare's GraphQL API:
-
-```graphql
-query {
-  viewer {
-    accounts(filter: { accountTag: "your-account-id" }) {
-      aiGatewayRequestsAdaptiveGroups(
-        limit: 1000
-        filter: { datetimeHour_geq: "2026-09-01T00:00:00Z" }
-      ) {
-        count
-        sum { tokensIn, tokensOut, costUSD }
-        dimensions { model, provider, gateway, ts: datetimeHour }
-      }
-    }
-  }
-}
-```
 
 ## License
 

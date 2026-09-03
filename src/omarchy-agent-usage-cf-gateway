@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Omarchy agents panel collector for CF AI Gateway.
+"""Omarchy agents panel collector for CF AI Gateway + MiMo Token Plan.
 
-Wraps the CF AI Gateway analytics collector into the JSON schema
-the Omarchy agents panel expects. Install as:
+Wraps the unified collector into the JSON schema the Omarchy agents panel expects.
+Install as:
   ~/.local/bin/omarchy-agent-usage-cf-gateway
   or symlink into /usr/share/omarchy/bin/
 """
@@ -10,26 +10,31 @@ the Omarchy agents panel expects. Install as:
 import json
 import sys
 from pathlib import Path
+import importlib.util
 
-# Add the collector module
-COLLECTOR = Path(__file__).parent / "collector.py"
+# Find the collector — try relative to script, then ~/.local/bin
+_script_dir = Path(__file__).parent
+COLLECTOR = _script_dir / "collector.py"
 if not COLLECTOR.exists():
-    # Try relative to script location
     COLLECTOR = Path.home() / ".local" / "bin" / "cf-ai-gateway-collector"
 
 def main():
     try:
-        # Import and run the collector
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("collector", str(COLLECTOR))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        
+        # Add collector's directory to sys.path and import by filename
+        collector_path = Path(COLLECTOR)
+        if not collector_path.exists():
+            raise FileNotFoundError(f"Collector not found: {COLLECTOR}")
+
+        # Read and exec the collector module
+        import types
+        mod = types.ModuleType("collector")
+        mod.__file__ = str(collector_path)
+        exec(compile(collector_path.read_text(), str(collector_path), "exec"), mod.__dict__)
+
         cfg = mod.load_config()
         record = mod.collect(cfg)
         print(json.dumps(record))
     except Exception as e:
-        # Fallback empty record
         from datetime import datetime, timedelta, timezone
         now = datetime.now(timezone.utc)
         dates = [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
