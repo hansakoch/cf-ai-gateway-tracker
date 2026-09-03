@@ -109,24 +109,11 @@ def load_config() -> dict:
         "account_id": "",
         "api_token": "",
         "gateway_id": "default",
-        "mimo_token_plan": {
-            "enabled": False,
-            "monthly_credits": 0,
-            "current_used": 0,
-            "dashboard_updated": "",
-            "renewal_day": 1,
-            "tier_label": "",
-            "api_base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
-            "models": {},
-        },
     }
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH) as f:
                 cfg = json.load(f)
-            # Deep merge mimo_token_plan
-            if "mimo_token_plan" in cfg:
-                defaults["mimo_token_plan"].update(cfg.pop("mimo_token_plan"))
             defaults.update(cfg)
         except Exception:
             pass
@@ -319,70 +306,15 @@ def collect_gateways(cfg: dict) -> list[dict]:
     return []
 
 
-def collect_mimo(cfg: dict) -> dict | None:
-    """Collect MiMo Token Plan details from config."""
-    mimo = cfg.get("mimo_token_plan", {})
-    if not mimo.get("enabled"):
-        return None
-
-    monthly_credits = mimo.get("monthly_credits", 0)
-    current_used = mimo.get("current_used", 0)
-    dashboard_updated = mimo.get("dashboard_updated", "")
-    renewal_day = mimo.get("renewal_day", 1)
-    tier_label = mimo.get("tier_label", "")
-    models = mimo.get("models", {})
-
-    if monthly_credits <= 0:
-        return None
-
-    percent = current_used / monthly_credits if monthly_credits > 0 else 0
-
-    # Calculate run-out date from dashboard snapshot
-    runout_date = None
-    if current_used > 0 and dashboard_updated:
-        try:
-            dash_date = datetime.strptime(dashboard_updated, "%Y-%m-%d")
-            now = datetime.now()
-            if dash_date.day >= renewal_day:
-                days_at_snapshot = dash_date.day - renewal_day
-            else:
-                days_at_snapshot = (31 - renewal_day) + dash_date.day
-            days_at_snapshot = max(days_at_snapshot, 1)
-            daily_rate = current_used / days_at_snapshot
-            remaining = monthly_credits - current_used
-            days_since = (now - dash_date).days
-            remaining -= daily_rate * days_since
-            if daily_rate > 0 and remaining > 0:
-                days_left = remaining / daily_rate
-                runout_date = now + timedelta(days=days_left)
-        except ValueError:
-            pass
-
-    return {
-        "monthly_credits": monthly_credits,
-        "current_used": current_used,
-        "percent": percent,
-        "renewal_day": renewal_day,
-        "tier_label": tier_label,
-        "models": models,
-        "runout_date": runout_date,
-        "dashboard_updated": dashboard_updated,
-    }
-
-
 def collect(cfg: dict) -> dict:
-    """Collect unified usage from CF AI Gateway + MiMo Token Plan."""
+    """Collect CF AI Gateway usage analytics."""
     now = datetime.now(timezone.utc)
     dates = [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
 
-    # ── CF AI Gateway (primary) ──────────────────────────────────────
+    # ── CF AI Gateway analytics ──────────────────────────────────────
     gw = collect_gateway(cfg)
     gateways = collect_gateways(cfg)
 
-    # ── MiMo Token Plan (supplementary) ──────────────────────────────
-    mimo = collect_mimo(cfg)
-
-    # ── Build unified record ─────────────────────────────────────────
     today_tokens = 0
     today_requests = 0
     today_by_model: dict[str, int] = {}
@@ -402,7 +334,6 @@ def collect(cfg: dict) -> dict:
 
     recent_days = [{"date": d, "messageCount": daily_map.get(d, 0)} for d in dates]
 
-    # Model usage for panel
     model_usage = {}
     for model, bucket in month_by_model.items():
         model_usage[model] = {
@@ -411,27 +342,6 @@ def collect(cfg: dict) -> dict:
             "cacheReadInputTokens": 0,
             "cacheCreationInputTokens": 0,
         }
-
-    # ── Limits from MiMo Token Plan ──────────────────────────────────
-    limits = []
-    tier_label = ""
-
-    if mimo:
-        monthly_credits = mimo["monthly_credits"]
-        percent = mimo["percent"]
-        tier_label = mimo["tier_label"]
-        runout = mimo.get("runout_date")
-
-        if percent > 0:
-            limits.append({
-                "label": "Monthly",
-                "title": "MiMo Token Plan",
-                "percent": min(percent, 1.0),
-                "resetsAt": month_end_iso(),
-            })
-
-        if runout:
-            tier_label = f"{tier_label} · runs out {runout.strftime('%b %d')}" if tier_label else f"runs out {runout.strftime('%b %d')}"
 
     # ── Build record ─────────────────────────────────────────────────
     record = {
@@ -451,36 +361,14 @@ def collect(cfg: dict) -> dict:
         "activeDays": len([d for d in daily_map.values() if d > 0]),
         "activeDates": sorted(daily_map.keys()),
         "modelUsage": model_usage,
-        "limits": limits,
-        "tierLabel": tier_label,
-        # Provider breakdown
+        "limits": [],
+        "tierLabel": "",
         "providers": month_by_provider,
         "todayTokensIn": gw["today_tokens_in"] if gw else 0,
         "todayTokensOut": gw["today_tokens_out"] if gw else 0,
     }
 
-    # Add MiMo details if available
-    if mimo:
-        record["mimo"] = {
-            "monthlyCredits": mimo["monthly_credits"],
-            "currentUsed": mimo["current_used"],
-            "percent": round(mimo["percent"] * 100, 1),
-            "renewalDay": mimo["renewal_day"],
-            "dashboardUpdated": mimo["dashboard_updated"],
-            "models": mimo["models"],
-        }
-        # Next renewal date
-        renewal_day = mimo["renewal_day"]
-        if now.day >= renewal_day:
-            next_renewal = (now.replace(day=1) + timedelta(days=32)).replace(day=renewal_day)
-        else:
-            next_renewal = now.replace(day=renewal_day)
-        record["billing"] = {
-            "nextRenewal": next_renewal.strftime("%Y-%m-%d"),
-            "daysUntilRenewal": (next_renewal - now.replace(hour=0, minute=0, second=0, microsecond=0)).days,
-        }
-
-    # Add gateway info
+    # Gateway list
     if gateways:
         record["gateways"] = [
             {
@@ -527,19 +415,6 @@ def test_connection(cfg: dict) -> bool:
     except RuntimeError as e:
         print(f"⚠ Gateway: {e}")
 
-    # Check MiMo Token Plan
-    mimo = cfg.get("mimo_token_plan", {})
-    if mimo.get("enabled"):
-        credits = mimo.get("monthly_credits", 0)
-        used = mimo.get("current_used", 0)
-        pct = (used / credits * 100) if credits > 0 else 0
-        print(f"✓ MiMo Token Plan: {pct:.0f}% used ({used/1e9:.0f}B / {credits/1e9:.0f}B credits)")
-        models = mimo.get("models", {})
-        for name, info in models.items():
-            print(f"  {name}: {info.get('credit_multiplier', '?')}x credits, {info.get('type', '?')}")
-    else:
-        print("  MiMo Token Plan: not configured")
-
     return True
 
 
@@ -564,12 +439,13 @@ def list_providers(cfg: dict) -> None:
     else:
         print("  (no data)")
 
-    mimo = record.get("mimo")
-    if mimo:
-        print(f"\n=== MiMo Token Plan ===")
-        print(f"  Used: {mimo['percent']}% ({mimo['currentUsed']/1e9:.0f}B / {mimo['monthlyCredits']/1e9:.0f}B credits)")
-        print(f"  Renewal day: {mimo['renewalDay']}")
-        print(f"  Dashboard updated: {mimo['dashboardUpdated']}")
+    # Gateway info
+    gateways = record.get("gateways", [])
+    if gateways:
+        print(f"\n=== AI Gateways ({len(gateways)}) ===")
+        for g in gateways:
+            default = " (default)" if g.get("isDefault") else ""
+            print(f"  {g['id']}{default}: {g.get('billingMode', '?')}")
 
     print(f"\nToday: {record['todayTotalTokens']:,} tokens, {record['todayPrompts']} requests")
 
