@@ -1,12 +1,15 @@
 #!/bin/bash
 # Auto-update CF AI Gateway Tracker from GitHub
-# Run via cron or systemd timer
+# Run manually or via cron/systemd timer
 
-REPO_DIR="/tmp/cf-ai-gateway-tracker"
+set -e
+
+REPO_DIR="$HOME/Work/repos/cf-ai-gateway-tracker"
 INSTALL_DIR="$HOME/.local/bin"
 
 # Clone if missing
 if [ ! -d "$REPO_DIR" ]; then
+    mkdir -p "$(dirname "$REPO_DIR")"
     git clone https://github.com/hansakoch/cf-ai-gateway-tracker.git "$REPO_DIR"
 fi
 
@@ -20,10 +23,15 @@ chmod +x "$INSTALL_DIR/omarchy-agent-usage-cf-gateway"
 
 # Install icon if Omarchy panel exists
 if [ -d /usr/share/omarchy/shell/plugins/agents/assets ]; then
-    sudo cp assets/cf-ai-gateway.svg /usr/share/omarchy/shell/plugins/agents/assets/ 2>/dev/null
+    sudo cp assets/cf-ai-gateway.svg /usr/share/omarchy/shell/plugins/agents/assets/ 2>/dev/null || true
 fi
 
 # Symlink into Omarchy bin if it exists
 if [ -d /usr/share/omarchy/bin ]; then
-    sudo ln -sf "$INSTALL_DIR/omarchy-agent-usage-cf-gateway" /usr/share/omarchy/bin/omarchy-agent-usage-cf-gateway 2>/dev/null
+    sudo ln -sf "$INSTALL_DIR/omarchy-agent-usage-cf-gateway" /usr/share/omarchy/bin/omarchy-agent-usage-cf-gateway 2>/dev/null || true
 fi
+
+# Clear stale cache so next panel refresh gets fresh data
+rm -f "$HOME/.cache/cf-ai-gateway/collector.json"
+
+echo "✓ CF AI Gateway Tracker updated"

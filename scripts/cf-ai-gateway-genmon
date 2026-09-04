@@ -1,45 +1,47 @@
 #!/bin/bash
-# XFCE genmon widget for CF AI Gateway + MiMo Token Plan usage
+# XFCE genmon widget for CF AI Gateway + MiMo Token Plan usage.
+#
+# Uses the collector's disk cache — never makes HTTP requests directly.
+# The collector refreshes every 30 minutes; this just reads the cached JSON.
 
-MIMO_PCT=""
-GW_COUNT=""
+CACHE="$HOME/.cache/cf-ai-gateway/collector.json"
+COLLECTOR="$HOME/.local/bin/cf-ai-gateway-collector"
 
-# MiMo Token Plan
-if [ -f "$HOME/.config/mimocode/usage-config.json" ]; then
-    MIMO_PCT=$(python3 -c "
-import json
-d = json.load(open('$HOME/.config/mimocode/usage-config.json'))
-c = d.get('monthly_tokens', 0)
-u = d.get('current_used_credits', 0)
-if c > 0 and u > 0:
-    print(f'{u/c*100:.0f}%')
-" 2>/dev/null)
+# If cache is stale or missing, trigger a background refresh (non-blocking)
+if [ ! -f "$CACHE" ] || [ $(find "$CACHE" -mmin +30 2>/dev/null | wc -l) -gt 0 ]; then
+    python3 "$COLLECTOR" --live >/dev/null 2>&1 &
 fi
 
-# CF Gateway
-if [ -f "$HOME/.config/cf-ai-gateway/config.json" ]; then
-    GW_COUNT=$(python3 -c "
-import json, urllib.request
-d = json.load(open('$HOME/.config/cf-ai-gateway/config.json'))
-a = d.get('account_id', '')
-t = d.get('api_token', '')
-if a and t:
-    req = urllib.request.Request(f'https://api.cloudflare.com/client/v4/accounts/{a}/ai-gateway/gateways', method='GET')
-    req.add_header('Authorization', f'Bearer {t}')
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-            print(len(data.get('result', [])))
-    except: pass
-" 2>/dev/null)
+# Read cached data
+if [ -f "$CACHE" ]; then
+    python3 -c "
+import json, sys
+try:
+    d = json.load(open('$CACHE'))
+    parts = []
+    limits = d.get('limits', [])
+    if limits:
+        pct = limits[0].get('percent', 0) * 100
+        parts.append(f'MiMo {pct:.0f}%')
+    gw = d.get('gateways', [])
+    if gw:
+        parts.append(f'CF {len(gw)} gw')
+    today = d.get('todayTotalTokens', 0)
+    if today > 0:
+        if today >= 1_000_000:
+            parts.append(f'{today/1_000_000:.0f}M today')
+        else:
+            parts.append(f'{today/1_000:.0f}K today')
+    text = ' · '.join(parts) if parts else 'AI: no data'
+    tier = d.get('tierLabel', '')
+    print(f'<txt>{text}</txt>')
+    print(f'<tool>CF AI Gateway: {len(gw)} gateways\n{tier}</tool>')
+except Exception:
+    print('<txt>AI: error</txt>')
+" 2>/dev/null
+else
+    echo "<txt>AI: no cache</txt>"
+    echo "<tool>Run: python3 ~/.local/bin/cf-ai-gateway-collector --test</tool>"
 fi
 
-# Build display
-TEXT=""
-[ -n "$MIMO_PCT" ] && TEXT="MiMo $MIMO_PCT"
-[ -n "$GW_COUNT" ] && TEXT="${TEXT:+$TEXT · }CF $GW_COUNT gw"
-[ -z "$TEXT" ] && TEXT="AI: no config"
-
-echo "<txt>$TEXT</txt>"
-echo "<tool>CF AI Gateway: ${GW_COUNT:-?} gateways\nMiMo Token Plan: ${MIMO_PCT:-?} used</tool>"
 echo "<icon>utilities-terminal</icon>"

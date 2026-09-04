@@ -12,16 +12,14 @@ WRAPPER_SRC="$SCRIPT_DIR/src/omarchy-agent-usage-cf-gateway"
 
 echo "=== CF AI Gateway Tracker Setup ==="
 
-# 1. Create config directory
+# 1. Create config directory + template
 mkdir -p "$CONFIG_DIR"
 if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" << 'EOF'
 {
     "account_id": "",
     "api_token": "",
-    "gateway_id": "default",
-    "monthly_budget_credits": 0,
-    "tier_label": ""
+    "gateway_id": "default"
 }
 EOF
     echo "✓ Created config template: $CONFIG_FILE"
@@ -47,7 +45,13 @@ if [ -d /usr/share/omarchy/bin ]; then
     echo "✓ Symlinked into /usr/share/omarchy/bin/"
 fi
 
-# 5. Test connectivity if config has values
+# 5. Install genmon script
+if [ -d "$SCRIPT_DIR/scripts" ]; then
+    cp "$SCRIPT_DIR/scripts/cf-ai-gateway-genmon" "$HOME/.local/bin/" 2>/dev/null || true
+    chmod +x "$HOME/.local/bin/cf-ai-gateway-genmon" 2>/dev/null || true
+fi
+
+# 6. Test connectivity if config has values
 if command -v python3 &>/dev/null; then
     account=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('account_id',''))" 2>/dev/null)
     if [ -n "$account" ]; then
@@ -64,7 +68,10 @@ echo ""
 echo "=== Setup complete ==="
 echo "1. Edit $CONFIG_FILE with your Cloudflare credentials"
 echo "2. Run: python3 ~/.local/bin/cf-ai-gateway-collector --test"
-echo "3. The Omarchy agents panel will pick up the data automatically"
+echo "3. The Omarchy agents panel picks up data automatically (30min cache)"
+echo ""
+echo "MiMo Token Plan: Open xiaomimimo.com in Chromium for live data"
+echo "  → The collector reads your plan via Chrome DevTools Protocol"
 echo ""
 echo "Get your API token: https://dash.cloudflare.com/profile/api-tokens"
 echo "  → Permissions: AI Gateway - Read, AI Gateway - Edit"
