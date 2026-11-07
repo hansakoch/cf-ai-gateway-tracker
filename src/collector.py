@@ -66,7 +66,7 @@ query($accountId: String!, $start: String!, $end: String!, $limit: Int!) {
       ) {
         count
         sum { tokensIn tokensOut }
-        dimensions { date: datetimeDay model provider }
+        dimensions { date model provider gateway }
       }
     }
   }
@@ -349,8 +349,9 @@ def collect(cfg: dict) -> dict:
     gateways = fetch_gateways(cfg)
     connected = gw is not None or len(gateways) > 0
 
-    # Fetch MiMo Token Plan (live from browser)
-    plan = load_mimo_plan()
+    # MiMo plan tracking lives in its own panel tabs (mimocode / mimo-desktop);
+    # this record is Cloudflare AI Gateway analytics only.
+    plan = None
 
     # Build gateway analytics record
     today_tokens = 0
@@ -416,46 +417,10 @@ def collect(cfg: dict) -> dict:
             for g in gateways
         ]
 
-    # ── MiMo Token Plan limits ───────────────────────────────────────
-    if plan:
-        plan_detail = plan.get("detail", {}).get("data", {})
-        plan_usage = plan.get("usage", {}).get("data", {})
-        month_items = plan_usage.get("monthUsage", {}).get("items", [])
-
-        if month_items:
-            item = month_items[0]
-            percent = item.get("percent", 0)
-            used = item.get("used", 0)
-            expires = plan_detail.get("currentPeriodEnd", "")
-            resets_at = ""
-            if expires:
-                try:
-                    resets_at = expires.replace(" ", "T") + "+00:00"
-                except Exception:
-                    resets_at = _month_end_iso()
-            else:
-                resets_at = _month_end_iso()
-
-            record["limits"].append({
-                "label": "Monthly",
-                "title": plan_detail.get("planName", "MiMo Token Plan"),
-                "percent": percent,
-                "used": used,
-                "resetsAt": resets_at,
-            })
-
-            # Tier label with days left
-            plan_name = plan_detail.get("planName", "MiMo")
-            auto = plan_detail.get("enableAutoRenew", False)
-            renew_str = " Auto-Renewal" if auto else ""
-            try:
-                end_date = datetime.fromisoformat(expires.replace(" ", "T")).date()
-                days_left = max((end_date - datetime.now(timezone.utc).date()).days, 0)
-                record["tierLabel"] = f"{plan_name}{renew_str} · {days_left}d left"
-            except Exception:
-                record["tierLabel"] = f"{plan_name}{renew_str}"
-
-    elif not has_traffic and gateways:
+    # ── Gateway summary ────────────────────────────────────────
+    if has_traffic:
+        record["tierLabel"] = f"{len(gateways)} gateways · {month_requests:,} requests"
+    elif gateways:
         record["tierLabel"] = f"{len(gateways)} gateways · no traffic yet"
 
     return record
